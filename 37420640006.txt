@@ -1,0 +1,252 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+local ASSET_ID_1 = 80023728627618
+local ASSET_ID_2 = 106979401006635
+
+local LEVITATION_HEIGHT = 0.2 
+
+local CONFIG = {
+	["Aura_Binary404"] = {
+		AssetID = ASSET_ID_2, Height = 0, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = true, ColorMode = "Mix", DoubleAura = false, Scale = 1.2
+	},
+	["North Star"] = {
+		AssetID = ASSET_ID_1, Height = 0.5, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = true, ColorMode = "Mix", DoubleAura = false, Scale = 1
+	},
+	["POF:RE AURA CRYOGEN"] = {
+		AssetID = ASSET_ID_1, Height = 1.2, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = true, ColorMode = "Mix", DoubleAura = true, Scale = 1
+	},
+	["Aura Kurama"] = {
+		AssetID = ASSET_ID_2, Height = 0, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = true, ColorMode = "Mix", DoubleAura = false, Scale = 1.2
+	},
+	["POF:RE AURA NANO"] = {
+		AssetID = ASSET_ID_1, Height = 1, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = false, ColorMode = "Nano", DoubleAura = false, Scale = 1
+	},
+	["POF:RE AURA: Gravity God"] = {
+		AssetID = ASSET_ID_1, Height = 0, Position = Vector3.new(0, 0, 0),
+		AlwaysShow = true, ColorMode = "Gravity", DoubleAura = false, Scale = 1
+	},
+}
+
+local COLOR_TIM_DAM = Color3.fromRGB(110, 0, 190)
+local COLOR_TIM_NHAT = Color3.fromRGB(195, 120, 255)
+local COLOR_TRANG = Color3.fromRGB(255, 255, 255)
+local mixColors = {COLOR_TIM_DAM, COLOR_TIM_NHAT, COLOR_TRANG}
+
+local function IsBodyPart(partName)
+	local bodyParts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg", "HumanoidRootPart", "UpperTorso", "LowerTorso", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
+	return table.find(bodyParts, partName) ~= nil
+end
+
+local function ApplyCustomTheme(element, mode)
+	if mode == "Original" then return end 
+	local c1, c2
+	if mode == "Gravity" then
+		c1 = COLOR_TIM_NHAT; c2 = COLOR_TIM_NHAT
+	elseif mode == "Nano" then
+		c1 = COLOR_TIM_DAM; c2 = COLOR_TRANG
+	else
+		c1 = mixColors[math.random(1, #mixColors)]
+		c2 = mixColors[math.random(1, #mixColors)]
+	end
+	
+	if element:IsA("ParticleEmitter") or element:IsA("Trail") or element:IsA("Beam") then
+		element.Color = ColorSequence.new(c1, c2)
+	elseif element:IsA("Light") then
+		element.Color = c1
+	elseif element:IsA("Highlight") then
+		element.FillColor = c1; element.OutlineColor = c2
+	elseif element:IsA("BasePart") and not IsBodyPart(element.Name) then
+		element.Color = c1
+	end
+end
+
+local function ScaleParticles(parent, scale)
+	if scale == 1 then return end
+	for _, v in ipairs(parent:GetDescendants()) do
+		if v:IsA("ParticleEmitter") then
+			local currentSize = v.Size
+			local keypoints = currentSize.Keypoints
+			local newKeypoints = {}
+			for _, kp in ipairs(keypoints) do
+				table.insert(newKeypoints, NumberSequenceKeypoint.new(kp.Time, kp.Value * scale, kp.Envelope * scale))
+			end
+			v.Size = NumberSequence.new(newKeypoints)
+		elseif v:IsA("Trail") or v:IsA("Beam") then
+			v.Width0 = v.Width0 * scale
+			v.Width1 = v.Width1 * scale
+		elseif v:IsA("Light") then
+			v.Range = v.Range * scale
+		end
+	end
+end
+
+local function ManualScaleModel(model, scale)
+	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	if not primary then return end
+	local parts = {}
+	for _, v in ipairs(model:GetDescendants()) do
+		if v:IsA("BasePart") then parts[v] = primary.CFrame:ToObjectSpace(v.CFrame) end
+	end
+	for part, localCFrame in pairs(parts) do
+		part.Size = part.Size * scale
+		local pos = localCFrame.Position * scale
+		local rot = localCFrame - localCFrame.Position
+		part.CFrame = primary.CFrame * (CFrame.new(pos) * rot)
+	end
+end
+
+local function ProcessAndAttachAura(targetNPC, char, hrp, humanoid)
+	local name = targetNPC.Name
+	local cfg = CONFIG[name]
+	if not cfg then return end
+	
+	local npcClone = targetNPC:Clone()
+	local npcMainPart = npcClone:IsA("Model") and (npcClone.PrimaryPart or npcClone:FindFirstChild("HumanoidRootPart") or npcClone:FindFirstChildWhichIsA("BasePart", true)) or npcClone
+	if npcClone:IsA("Model") and npcMainPart then npcClone.PrimaryPart = npcMainPart end
+
+	if cfg.Scale and cfg.Scale ~= 1 then
+		if npcClone:IsA("Model") then
+			if npcClone.ScaleTo then npcClone:ScaleTo(cfg.Scale) else ManualScaleModel(npcClone, cfg.Scale) end
+		else
+			npcClone.Size = npcClone.Size * cfg.Scale
+		end
+		ScaleParticles(npcClone, cfg.Scale)
+	end
+
+	local effectParts = {}
+
+	for _, v in ipairs(npcClone:GetDescendants()) do
+		if v:IsA("Motor6D") or v:IsA("Weld") or v:IsA("ManualWeld") or v:IsA("Snap") then
+			v:Destroy()
+		elseif v:IsA("BasePart") then
+			v.Anchored = false
+			v.CanCollide = false
+			
+			if IsBodyPart(v.Name) then
+				v.Transparency = 1 
+			else
+				ApplyCustomTheme(v, cfg.ColorMode)
+				effectParts[v] = v.Transparency
+				if not cfg.AlwaysShow then v.Transparency = 1 end
+			end
+			
+			if v ~= npcMainPart and npcMainPart then
+				local innerWeld = Instance.new("WeldConstraint")
+				innerWeld.Part0 = npcMainPart
+				innerWeld.Part1 = v
+				innerWeld.Parent = v
+			end
+		elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") or v:IsA("Light") or v:IsA("Highlight") then
+			ApplyCustomTheme(v, cfg.ColorMode)
+			if not cfg.AlwaysShow then v.Enabled = false else v.Enabled = true end
+		elseif v:IsA("Humanoid") or v:IsA("Decal") or v:IsA("Shirt") or v:IsA("Pants") then
+			v:Destroy()
+		end
+	end
+
+	local finalOffset = cfg.Position + Vector3.new(0, cfg.Height, 0)
+	if npcClone:IsA("Model") then
+		npcClone:PivotTo(hrp.CFrame * CFrame.new(finalOffset))
+	else
+		npcMainPart.CFrame = hrp.CFrame * CFrame.new(finalOffset)
+	end
+
+	local mainWeld = Instance.new("WeldConstraint")
+	mainWeld.Part0 = hrp
+	mainWeld.Part1 = npcMainPart
+	mainWeld.Parent = npcMainPart
+
+	npcClone.Parent = char
+
+	if not cfg.AlwaysShow then
+		local connection
+		connection = RunService.RenderStepped:Connect(function()
+			if not char or not char.Parent or not npcClone or not npcClone.Parent then
+				connection:Disconnect(); return
+			end
+			local isMoving = (humanoid.MoveDirection.Magnitude > 0) or (hrp.AssemblyLinearVelocity.Magnitude > 2)
+			if isMoving then
+				for part, originalTransparency in pairs(effectParts) do
+					if part and part.Parent then part.Transparency = originalTransparency end
+				end
+				for _, v in ipairs(npcClone:GetDescendants()) do
+					if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") or v:IsA("Light") or v:IsA("Highlight") then v.Enabled = true end
+				end
+			else
+				for part, _ in pairs(effectParts) do
+					if part and part.Parent then part.Transparency = 1 end
+				end
+				for _, v in ipairs(npcClone:GetDescendants()) do
+					if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") or v:IsA("Light") or v:IsA("Highlight") then v.Enabled = false end
+				end
+			end
+		end)
+	end
+end
+
+local function LoadAssetSafe(assetId)
+	local success, objects = pcall(function() return game:GetObjects("rbxassetid://" .. assetId) end)
+	if success and objects and objects[1] then
+		local folder = objects[1]
+		if folder:IsA("Model") then
+			folder:PivotTo(CFrame.new(0, 888888, 0))
+		elseif folder:IsA("BasePart") then
+			folder.CFrame = CFrame.new(0, 888888, 0)
+		end
+		folder.Parent = game.Workspace
+		return folder
+	end
+	warn("[Error] Tải thất bại Asset ID: " .. tostring(assetId))
+	return nil
+end
+
+local function CharacterLoaded(char)
+	local hrp = char:WaitForChild("HumanoidRootPart", 10)
+	local humanoid = char:WaitForChild("Humanoid", 10)
+	if not hrp or not humanoid then return end
+	
+	task.defer(function()
+		
+		task.wait(0.5) 
+		if humanoid and humanoid.Parent then
+			if humanoid.RigType == Enum.HumanoidRigType.R15 then
+				
+				humanoid.HipHeight = humanoid.HipHeight + LEVITATION_HEIGHT
+			else
+				
+				humanoid.HipHeight = LEVITATION_HEIGHT
+			end
+		end
+	end)
+
+	local folder1 = LoadAssetSafe(ASSET_ID_1)
+	local folder2 = LoadAssetSafe(ASSET_ID_2)
+
+	for npcName, cfg in pairs(CONFIG) do
+		local sourceFolder = (cfg.AssetID == ASSET_ID_1) and folder1 or folder2
+		if sourceFolder then
+			local targetNPC = (sourceFolder.Name == npcName) and sourceFolder or sourceFolder:FindFirstChild(npcName, true)
+			if targetNPC then
+				if cfg.DoubleAura then
+					ProcessAndAttachAura(targetNPC, char, hrp, humanoid)
+					ProcessAndAttachAura(targetNPC, char, hrp, humanoid)
+				else
+					ProcessAndAttachAura(targetNPC, char, hrp, humanoid)
+				end
+			end
+		end
+	end
+
+	if folder1 then folder1:Destroy() end
+	if folder2 then folder2:Destroy() end
+end
+
+if player.Character then task.spawn(CharacterLoaded, player.Character) end
+player.CharacterAdded:Connect(CharacterLoaded)
